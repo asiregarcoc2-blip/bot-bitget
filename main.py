@@ -87,7 +87,7 @@ def set_leverage():
 
 # === 5. STRATEGI SWEEP & RECLAIM (PEMBACAAN DATA) ===
 def fetch_ohlcv(symbol, timeframe, limit=300):
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit, params={'type': 'swap'})
     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     return df
