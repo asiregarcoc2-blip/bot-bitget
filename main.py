@@ -74,6 +74,7 @@ exchange = ccxt.bitget({
         'defaultType': 'swap',
         'defaultSettle': 'usdt',
         'subType': 'linear',
+        'fetchMarkets': ['swap],
     },
 })
 
