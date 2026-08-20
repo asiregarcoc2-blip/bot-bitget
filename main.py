@@ -252,6 +252,7 @@ def process_telegram_commands():
                     help_msg = (
                         "🤖 *KONTROL BOT TELEGRAM*\n\n"
                         "• `/list` : Lihat koin dipantau & pengaturan\n"
+                        "• `/price KOIN` : Cek harga Futures terkini (misal: `/price ETH` atau `/p BTC`)\n"
                         "• `/add KOIN1 KOIN2` : Tambah koin (misal: `/add XRP` atau `/add XRP BTC`)\n"
                         "• `/del KOIN1 KOIN2` : Hapus koin (misal: `/del DOGE`)\n"
                         "• `/margin NOMINAL` : Ubah modal/posisi dalam USDT (misal: `/margin 20`)\n"
@@ -269,6 +270,34 @@ def process_telegram_commands():
                         f"• *Total Koin ({len(config['symbols'])}):*\n{coins_fmt}"
                     )
                     send_telegram(status_msg)
+
+                # Perintah: /price KOIN atau /p KOIN
+                elif text.startswith("/price") or text.startswith("/p "):
+                    parts = text.split()
+                    if len(parts) > 1:
+                        coin = parts[1].upper().replace("USDT", "").replace("/", "")
+                        target_symbol = f"{coin}/USDT:USDT"
+                        try:
+                            ticker = exchange.fetch_ticker(target_symbol, params={'type': 'swap'})
+                            last_price = ticker['last']
+                            high_24h = ticker.get('high', 0)
+                            low_24h = ticker.get('low', 0)
+                            change_24h = ticker.get('percentage', 0)
+
+                            change_icon = "📈" if change_24h >= 0 else "📉"
+                            
+                            price_msg = (
+                                f"📊 *HARGA FUTURES: {target_symbol}*\n\n"
+                                f"• *Harga Saat Ini:* `${last_price:,.4f}`\n"
+                                f"• *Perubahan 24j:* `{change_24h:+.2f}%` {change_icon}\n"
+                                f"• *Tertinggi 24j:* `${high_24h:,.4f}`\n"
+                                f"• *Terendah 24j:* `${low_24h:,.4f}`"
+                            )
+                            send_telegram(price_msg)
+                        except Exception as e:
+                            send_telegram(f"❌ Gagal mengambil harga untuk `{target_symbol}`. Pastikan koin tersedia di Futures.")
+                    else:
+                        send_telegram("⚠️ Format salah. Contoh: `/price ETH` atau `/p BTC`")
 
                 # Perintah: /add (Bisa satu atau banyak koin sekaligus)
                 elif text.startswith("/add"):
