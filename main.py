@@ -31,7 +31,7 @@ PASSPHRASE = os.getenv('BITGET_PASSPHRASE')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-SYMBOL = 'CYS/USDT:USDT'  # Pasangan Futures Bitget
+SYMBOL = 'BTW/USDT:USDT'  # Pasangan Futures Bitget
 TIMEFRAME_ENTRY = '5m'
 TIMEFRAME_HTF_1 = '1h'
 TIMEFRAME_HTF_2 = '4h'
