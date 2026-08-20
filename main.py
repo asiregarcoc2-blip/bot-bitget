@@ -74,9 +74,15 @@ exchange = ccxt.bitget({
         'defaultType': 'swap',
         'defaultSettle': 'usdt',
         'subType': 'linear',
-        'fetchMarkets': ['swap],
+        'fetchMarkets': ['swap'],
     },
 })
+
+# Paksa CCXT memuat daftar pasar Futures saja (Mencegah pemanggilan API Spot)
+try:
+    exchange.load_markets(params={'type': 'swap'})
+except Exception as e:
+    logging.error(f"Gagal memuat pasar Futures: {e}")
 
 def set_leverage():
     try:
