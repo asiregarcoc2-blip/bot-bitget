@@ -108,28 +108,38 @@ def resolve_symbol(coin_str):
     clean_coin = coin_str.upper().replace("USDT", "").replace("/", "").replace(":", "").strip()
     return f"{clean_coin}USDT"
 
-def fetch_symbol_ticker_safe(raw_coin):
-    """Mencari harga dengan timeout cepat"""
+def fetch_symbol_ticker_fast(raw_coin):
+    """Mengambil harga langsung dari Public API Bitget (Cepat & Anti-Macet)"""
     clean_coin = raw_coin.upper().replace("USDT", "").replace("/", "").replace(":", "").strip()
-    candidates = [
-        f"{clean_coin}/USDT:USDT",
-        f"{clean_coin}/USDT",
-        f"{clean_coin}USDT"
-    ]
-    for sym in candidates:
-        try:
-            ticker = exchange.fetch_ticker(sym)
-            if ticker and ticker.get('last') is not None:
-                return ticker, sym
-        except Exception:
-            continue
-    return None, f"{clean_coin}USDT"
+    symbol_mix = f"{clean_coin}USDT"
+    
+    url = f"https://api.bitget.com/api/v2/mix/market/ticker?productType=USDT-FUTURES&symbol={symbol_mix}"
+    try:
+        res = requests.get(url, timeout=3).json()
+        if res.get("code") == "00000" and res.get("data"):
+            data = res["data"][0]
+            last_price = float(data.get("lastPr", 0))
+            high_24h = float(data.get("high24h", 0))
+            low_24h = float(data.get("low24h", 0))
+            change_24h = float(data.get("change24h", 0)) * 100
+            
+            return {
+                "last": last_price,
+                "high": high_24h,
+                "low": low_24h,
+                "change": change_24h
+            }, symbol_mix
+    except Exception as e:
+        logging.error(f"Gagal fetch ticker fast {symbol_mix}: {e}")
+        
+    return None, symbol_mix
 
 def set_leverage(symbol, lev_val):
     try:
-        _, target_sym = fetch_symbol_ticker_safe(symbol)
-        exchange.set_leverage(lev_val, target_sym)
-        logging.info(f"[DEMO] Leverage disetel ke {lev_val}x untuk {target_sym}")
+        clean_coin = resolve_symbol(symbol)
+        ccxt_sym = f"{clean_coin.replace('USDT', '')}/USDT:USDT"
+        exchange.set_leverage(lev_val, ccxt_sym)
+        logging.info(f"[DEMO] Leverage disetel ke {lev_val}x untuk {ccxt_sym}")
     except Exception as e:
         logging.warning(f"Gagal set leverage {symbol}: {e}")
 
@@ -139,8 +149,9 @@ def set_all_leverage():
 
 # === 5. STRATEGI SWEEP & RECLAIM ===
 def fetch_ohlcv(symbol, timeframe, limit=300):
-    _, target_sym = fetch_symbol_ticker_safe(symbol)
-    ohlcv = exchange.fetch_ohlcv(target_sym, timeframe=timeframe, limit=limit, params={'type': 'swap'})
+    clean_coin = resolve_symbol(symbol)
+    ccxt_sym = f"{clean_coin.replace('USDT', '')}/USDT:USDT"
+    ohlcv = exchange.fetch_ohlcv(ccxt_sym, timeframe=timeframe, limit=limit, params={'type': 'swap'})
     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     return df
@@ -210,12 +221,14 @@ def analyze_market(symbol):
 
 # === 6. EKSEKUSI ORDER ===
 def execute_trade(symbol, signal, entry_price, sl_price, tp_price):
-    _, target_sym = fetch_symbol_ticker_safe(symbol)
-    positions = exchange.fetch_positions([target_sym])
+    clean_coin = resolve_symbol(symbol)
+    ccxt_sym = f"{clean_coin.replace('USDT', '')}/USDT:USDT"
+    
+    positions = exchange.fetch_positions([ccxt_sym])
     active_position = any(float(pos['contracts']) > 0 for pos in positions)
 
     if active_position:
-        logging.info(f"[DEMO] Posisi untuk {target_sym} masih terbuka. Melewati sinyal.")
+        logging.info(f"[DEMO] Posisi untuk {ccxt_sym} masih terbuka. Melewati sinyal.")
         return
 
     margin = config["position_size_usdt"]
@@ -225,32 +238,32 @@ def execute_trade(symbol, signal, entry_price, sl_price, tp_price):
     if signal == 'LONG':
         msg = (
             f"🚀 *BITGET AUTOTRADE [DEMO]: LONG*\n\n"
-            f"• *Symbol:* `{target_sym}`\n"
+            f"• *Symbol:* `{clean_coin}`\n"
             f"• *Entry:* `${entry_price:,.4f}`\n"
             f"• *SL:* `${sl_price:,.4f}`\n"
             f"• *TP:* `${tp_price:,.4f}`\n"
             f"• *Margin:* `${margin}` ({lev}x)"
         )
         send_telegram(msg)
-        exchange.create_market_buy_order(target_sym, amount)
-        exchange.create_order(target_sym, 'market', 'sell', amount, params={'triggerPrice': sl_price, 'stopLossPrice': sl_price, 'reduceOnly': True})
-        exchange.create_order(target_sym, 'market', 'sell', amount, params={'triggerPrice': tp_price, 'takeProfitPrice': tp_price, 'reduceOnly': True})
+        exchange.create_market_buy_order(ccxt_sym, amount)
+        exchange.create_order(ccxt_sym, 'market', 'sell', amount, params={'triggerPrice': sl_price, 'stopLossPrice': sl_price, 'reduceOnly': True})
+        exchange.create_order(ccxt_sym, 'market', 'sell', amount, params={'triggerPrice': tp_price, 'takeProfitPrice': tp_price, 'reduceOnly': True})
 
     elif signal == 'SHORT':
         msg = (
             f"🔻 *BITGET AUTOTRADE [DEMO]: SHORT*\n\n"
-            f"• *Symbol:* `{target_sym}`\n"
+            f"• *Symbol:* `{clean_coin}`\n"
             f"• *Entry:* `${entry_price:,.4f}`\n"
             f"• *SL:* `${sl_price:,.4f}`\n"
             f"• *TP:* `${tp_price:,.4f}`\n"
             f"• *Margin:* `${margin}` ({lev}x)"
         )
         send_telegram(msg)
-        exchange.create_market_sell_order(target_sym, amount)
-        exchange.create_order(target_sym, 'market', 'buy', amount, params={'triggerPrice': sl_price, 'stopLossPrice': sl_price, 'reduceOnly': True})
-        exchange.create_order(target_sym, 'market', 'buy', amount, params={'triggerPrice': tp_price, 'takeProfitPrice': tp_price, 'reduceOnly': True})
+        exchange.create_market_sell_order(ccxt_sym, amount)
+        exchange.create_order(ccxt_sym, 'market', 'buy', amount, params={'triggerPrice': sl_price, 'stopLossPrice': sl_price, 'reduceOnly': True})
+        exchange.create_order(ccxt_sym, 'market', 'buy', amount, params={'triggerPrice': tp_price, 'takeProfitPrice': tp_price, 'reduceOnly': True})
 
-# === 7. LISTENER PERINTAH INTERAKTIF TELEGRAM (THREAD TERPISAH) ===
+# === 7. LISTENER PERINTAH INTERAKTIF TELEGRAM ===
 def process_telegram_commands():
     last_update_id = 0
     while True:
@@ -294,21 +307,16 @@ def process_telegram_commands():
                         parts = text.split()
                         if len(parts) > 1:
                             raw_coin = parts[1]
-                            ticker, used_symbol = fetch_symbol_ticker_safe(raw_coin)
+                            data, used_symbol = fetch_symbol_ticker_fast(raw_coin)
 
-                            if ticker and ticker.get('last') is not None:
-                                last_price = ticker.get('last', 0)
-                                high_24h = ticker.get('high', 0) or 0
-                                low_24h = ticker.get('low', 0) or 0
-                                change_24h = ticker.get('percentage', 0) or 0
-                                change_icon = "📈" if change_24h >= 0 else "📉"
-                                
+                            if data:
+                                change_icon = "📈" if data['change'] >= 0 else "📉"
                                 price_msg = (
                                     f"📊 *HARGA FUTURES: {used_symbol}*\n\n"
-                                    f"• *Harga Saat Ini:* `${last_price:,.4f}`\n"
-                                    f"• *Perubahan 24j:* `{change_24h:+.2f}%` {change_icon}\n"
-                                    f"• *Tertinggi 24j:* `${high_24h:,.4f}`\n"
-                                    f"• *Terendah 24j:* `${low_24h:,.4f}`"
+                                    f"• *Harga Saat Ini:* `${data['last']:,.4f}`\n"
+                                    f"• *Perubahan 24j:* `{data['change']:+.2f}%` {change_icon}\n"
+                                    f"• *Tertinggi 24j:* `${data['high']:,.4f}`\n"
+                                    f"• *Terendah 24j:* `${data['low']:,.4f}`"
                                 )
                                 send_telegram(price_msg)
                             else:
@@ -390,7 +398,7 @@ def process_telegram_commands():
 
         time.sleep(1)
 
-# === 8. LOOP UTAMA BOT AUTOTRADE (THREAD TERPISAH) ===
+# === 8. LOOP UTAMA BOT AUTOTRADE ===
 def run_trading_loop():
     while True:
         for symbol in config["symbols"]:
@@ -406,19 +414,14 @@ def run_trading_loop():
 
             time.sleep(1)
         
-        # Jeda 5 menit antar siklus analisis
         time.sleep(300)
 
 if __name__ == '__main__':
     set_all_leverage()
 
-    # Thread 1: Web Server Keep-Alive
     Thread(target=run_web_server, daemon=True).start()
-
-    # Thread 2: Telegram Interaktif (Selalu Siap Respon Instan)
     Thread(target=process_telegram_commands, daemon=True).start()
 
     send_telegram("🤖 *Bot Interaktif Ready!*\nKirim `/help` untuk melihat daftar perintah.")
 
-    # Thread Utama: Loop Trading
     run_trading_loop()
