@@ -12,7 +12,7 @@ from flask import Flask
 # Konfigurasi Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# === 1. MINI WEB SERVER UNTUK RENDER / KEEP-ALIVE ===
+# === 1. MINI WEB SERVER UNTUK KEEP-ALIVE ===
 app = Flask('')
 
 @app.route('/')
@@ -34,7 +34,7 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 CONFIG_FILE = "config.json"
 
 DEFAULT_CONFIG = {
-    "symbols": ["DOGE/USDT:USDT", "SOL/USDT:USDT", "LINK/USDT:USDT", "ADA/USDT:USDT"],
+    "symbols": ["DOGE/USDT", "SOL/USDT", "LINK/USDT", "ADA/USDT"],
     "position_size_usdt": 10,
     "leverage": 5
 }
@@ -109,10 +109,23 @@ try:
 except Exception as e:
     logging.warning(f"Warning load markets demo: {e}")
 
+def resolve_symbol(coin_str):
+    """Mendeteksi format simbol yang valid di pasar CCXT"""
+    clean_coin = coin_str.upper().replace("USDT", "").replace("/", "").replace(":", "")
+    candidate_1 = f"{clean_coin}/USDT"
+    candidate_2 = f"{clean_coin}/USDT:USDT"
+
+    if candidate_1 in exchange.markets:
+        return candidate_1
+    elif candidate_2 in exchange.markets:
+        return candidate_2
+    return candidate_1
+
 def set_leverage(symbol, lev_val):
     try:
-        exchange.set_leverage(lev_val, symbol)
-        logging.info(f"[DEMO] Leverage disetel ke {lev_val}x untuk {symbol}")
+        target_sym = resolve_symbol(symbol)
+        exchange.set_leverage(lev_val, target_sym)
+        logging.info(f"[DEMO] Leverage disetel ke {lev_val}x untuk {target_sym}")
     except Exception as e:
         logging.warning(f"Gagal set leverage {symbol}: {e}")
 
@@ -120,17 +133,19 @@ def set_all_leverage():
     for sym in config["symbols"]:
         set_leverage(sym, config["leverage"])
 
-# === 5. STRATEGI SWEEP & RECLAIM (PEMBACAAN DATA) ===
+# === 5. STRATEGI SWEEP & RECLAIM ===
 def fetch_ohlcv(symbol, timeframe, limit=300):
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit, params={'type': 'swap'})
+    target_sym = resolve_symbol(symbol)
+    ohlcv = exchange.fetch_ohlcv(target_sym, timeframe=timeframe, limit=limit, params={'type': 'swap'})
     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     return df
 
 def analyze_market(symbol):
-    df_5m = fetch_ohlcv(symbol, TIMEFRAME_ENTRY, limit=300)
-    df_1h = fetch_ohlcv(symbol, TIMEFRAME_HTF_1, limit=250)
-    df_4h = fetch_ohlcv(symbol, TIMEFRAME_HTF_2, limit=50)
+    target_sym = resolve_symbol(symbol)
+    df_5m = fetch_ohlcv(target_sym, TIMEFRAME_ENTRY, limit=300)
+    df_1h = fetch_ohlcv(target_sym, TIMEFRAME_HTF_1, limit=250)
+    df_4h = fetch_ohlcv(target_sym, TIMEFRAME_HTF_2, limit=50)
 
     df_1h['ema200'] = ta.ema(df_1h['close'], length=EMA_PERIOD)
     htf_ema = df_1h['ema200'].iloc[-2]
@@ -191,11 +206,12 @@ def analyze_market(symbol):
 
 # === 6. EKSEKUSI ORDER ===
 def execute_trade(symbol, signal, entry_price, sl_price, tp_price):
-    positions = exchange.fetch_positions([symbol])
+    target_sym = resolve_symbol(symbol)
+    positions = exchange.fetch_positions([target_sym])
     active_position = any(float(pos['contracts']) > 0 for pos in positions)
 
     if active_position:
-        logging.info(f"[DEMO] Posisi untuk {symbol} masih terbuka. Melewati sinyal.")
+        logging.info(f"[DEMO] Posisi untuk {target_sym} masih terbuka. Melewati sinyal.")
         return
 
     margin = config["position_size_usdt"]
@@ -205,30 +221,30 @@ def execute_trade(symbol, signal, entry_price, sl_price, tp_price):
     if signal == 'LONG':
         msg = (
             f"🚀 *BITGET AUTOTRADE [DEMO]: LONG*\n\n"
-            f"• *Symbol:* `{symbol}`\n"
+            f"• *Symbol:* `{target_sym}`\n"
             f"• *Entry:* `${entry_price:,.4f}`\n"
             f"• *SL:* `${sl_price:,.4f}`\n"
             f"• *TP:* `${tp_price:,.4f}`\n"
             f"• *Margin:* `${margin}` ({lev}x)"
         )
         send_telegram(msg)
-        exchange.create_market_buy_order(symbol, amount)
-        exchange.create_order(symbol, 'market', 'sell', amount, params={'triggerPrice': sl_price, 'stopLossPrice': sl_price, 'reduceOnly': True})
-        exchange.create_order(symbol, 'market', 'sell', amount, params={'triggerPrice': tp_price, 'takeProfitPrice': tp_price, 'reduceOnly': True})
+        exchange.create_market_buy_order(target_sym, amount)
+        exchange.create_order(target_sym, 'market', 'sell', amount, params={'triggerPrice': sl_price, 'stopLossPrice': sl_price, 'reduceOnly': True})
+        exchange.create_order(target_sym, 'market', 'sell', amount, params={'triggerPrice': tp_price, 'takeProfitPrice': tp_price, 'reduceOnly': True})
 
     elif signal == 'SHORT':
         msg = (
             f"🔻 *BITGET AUTOTRADE [DEMO]: SHORT*\n\n"
-            f"• *Symbol:* `{symbol}`\n"
+            f"• *Symbol:* `{target_sym}`\n"
             f"• *Entry:* `${entry_price:,.4f}`\n"
             f"• *SL:* `${sl_price:,.4f}`\n"
             f"• *TP:* `${tp_price:,.4f}`\n"
             f"• *Margin:* `${margin}` ({lev}x)"
         )
         send_telegram(msg)
-        exchange.create_market_sell_order(symbol, amount)
-        exchange.create_order(symbol, 'market', 'buy', amount, params={'triggerPrice': sl_price, 'stopLossPrice': sl_price, 'reduceOnly': True})
-        exchange.create_order(symbol, 'market', 'buy', amount, params={'triggerPrice': tp_price, 'takeProfitPrice': tp_price, 'reduceOnly': True})
+        exchange.create_market_sell_order(target_sym, amount)
+        exchange.create_order(target_sym, 'market', 'buy', amount, params={'triggerPrice': sl_price, 'stopLossPrice': sl_price, 'reduceOnly': True})
+        exchange.create_order(target_sym, 'market', 'buy', amount, params={'triggerPrice': tp_price, 'takeProfitPrice': tp_price, 'reduceOnly': True})
 
 # === 7. LISTENER PERINTAH INTERAKTIF TELEGRAM ===
 def process_telegram_commands():
@@ -247,7 +263,6 @@ def process_telegram_commands():
                 if chat_id != TELEGRAM_CHAT_ID:
                     continue
 
-                # Perintah: /start atau /help
                 if text in ["/start", "/help"]:
                     help_msg = (
                         "🤖 *KONTROL BOT TELEGRAM*\n\n"
@@ -260,7 +275,6 @@ def process_telegram_commands():
                     )
                     send_telegram(help_msg)
 
-                # Perintah: /list
                 elif text == "/list":
                     coins_fmt = "\n".join([f"• `{s}`" for s in config["symbols"]])
                     status_msg = (
@@ -271,19 +285,29 @@ def process_telegram_commands():
                     )
                     send_telegram(status_msg)
 
-                # Perintah: /price KOIN atau /p KOIN
                 elif text.startswith("/price") or text.startswith("/p "):
                     parts = text.split()
                     if len(parts) > 1:
-                        coin = parts[1].upper().replace("USDT", "").replace("/", "")
-                        target_symbol = f"{coin}/USDT:USDT"
+                        raw_coin = parts[1]
+                        target_symbol = resolve_symbol(raw_coin)
+                        
+                        ticker = None
                         try:
-                            ticker = exchange.fetch_ticker(target_symbol, params={'type': 'swap'})
-                            last_price = ticker['last']
+                            ticker = exchange.fetch_ticker(target_symbol)
+                        except Exception:
+                            # Fallback format alternatif jika terjadi error
+                            try:
+                                alt_symbol = f"{raw_coin.upper().replace('USDT', '').replace('/', '')}/USDT:USDT"
+                                ticker = exchange.fetch_ticker(alt_symbol)
+                                target_symbol = alt_symbol
+                            except Exception:
+                                ticker = None
+
+                        if ticker:
+                            last_price = ticker.get('last', 0)
                             high_24h = ticker.get('high', 0)
                             low_24h = ticker.get('low', 0)
-                            change_24h = ticker.get('percentage', 0)
-
+                            change_24h = ticker.get('percentage', 0) or 0
                             change_icon = "📈" if change_24h >= 0 else "📉"
                             
                             price_msg = (
@@ -294,24 +318,23 @@ def process_telegram_commands():
                                 f"• *Terendah 24j:* `${low_24h:,.4f}`"
                             )
                             send_telegram(price_msg)
-                        except Exception as e:
-                            send_telegram(f"❌ Gagal mengambil harga untuk `{target_symbol}`. Pastikan koin tersedia di Futures.")
+                        else:
+                            send_telegram(f"❌ Gagal mengambil harga untuk `{raw_coin}`. Pastikan koin tersedia di Futures.")
                     else:
                         send_telegram("⚠️ Format salah. Contoh: `/price ETH` atau `/p BTC`")
 
-                # Perintah: /add (Bisa satu atau banyak koin sekaligus)
                 elif text.startswith("/add"):
                     parts = text.split()[1:]
                     if parts:
                         added, exists = [], []
                         for coin in parts:
-                            formatted = f"{coin.upper().replace('USDT', '').replace('/', '')}/USDT:USDT"
-                            if formatted not in config["symbols"]:
-                                config["symbols"].append(formatted)
-                                set_leverage(formatted, config["leverage"])
-                                added.append(formatted)
+                            fmt = f"{coin.upper().replace('USDT', '').replace('/', '').replace(':', '')}/USDT"
+                            if fmt not in config["symbols"]:
+                                config["symbols"].append(fmt)
+                                set_leverage(fmt, config["leverage"])
+                                added.append(fmt)
                             else:
-                                exists.append(formatted)
+                                exists.append(fmt)
                         
                         save_config(config)
                         reply = ""
@@ -323,18 +346,17 @@ def process_telegram_commands():
                     else:
                         send_telegram("⚠️ Format salah. Contoh: `/add XRP` atau `/add XRP ETH BTC`")
 
-                # Perintah: /del (Bisa satu atau banyak koin sekaligus)
                 elif text.startswith("/del"):
                     parts = text.split()[1:]
                     if parts:
                         removed, not_found = [], []
                         for coin in parts:
-                            formatted = f"{coin.upper().replace('USDT', '').replace('/', '')}/USDT:USDT"
-                            if formatted in config["symbols"]:
-                                config["symbols"].remove(formatted)
-                                removed.append(formatted)
+                            fmt = f"{coin.upper().replace('USDT', '').replace('/', '').replace(':', '')}/USDT"
+                            if fmt in config["symbols"]:
+                                config["symbols"].remove(fmt)
+                                removed.append(fmt)
                             else:
-                                not_found.append(formatted)
+                                not_found.append(fmt)
 
                         save_config(config)
                         reply = ""
@@ -346,7 +368,6 @@ def process_telegram_commands():
                     else:
                         send_telegram("⚠️ Format salah. Contoh: `/del DOGE` atau `/del DOGE ADA`")
 
-                # Perintah: /margin NOMINAL
                 elif text.startswith("/margin"):
                     parts = text.split()
                     if len(parts) > 1 and parts[1].replace('.', '', 1).isdigit():
@@ -357,7 +378,6 @@ def process_telegram_commands():
                     else:
                         send_telegram("⚠️ Format salah. Contoh: `/margin 20` untuk $20 USDT.")
 
-                # Perintah: /leverage LEVERAGE
                 elif text.startswith("/leverage"):
                     parts = text.split()
                     if len(parts) > 1 and parts[1].isdigit():
