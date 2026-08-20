@@ -34,7 +34,7 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 CONFIG_FILE = "config.json"
 
 DEFAULT_CONFIG = {
-    "symbols": ["DOGE/USDT", "SOL/USDT", "LINK/USDT", "ADA/USDT"],
+    "symbols": ["DOGEUSDT", "SOLUSDT", "LINKUSDT", "ADAUSDT"],
     "position_size_usdt": 10,
     "leverage": 5
 }
@@ -104,22 +104,10 @@ exchange = ccxt.bitget({
 
 exchange.set_sandbox_mode(True)
 
-try:
-    exchange.load_markets(reload=True, params={'type': 'swap'})
-except Exception as e:
-    logging.warning(f"Warning load markets demo: {e}")
-
 def resolve_symbol(coin_str):
-    """Mendeteksi format simbol yang valid di pasar CCXT"""
-    clean_coin = coin_str.upper().replace("USDT", "").replace("/", "").replace(":", "")
-    candidate_1 = f"{clean_coin}/USDT"
-    candidate_2 = f"{clean_coin}/USDT:USDT"
-
-    if candidate_1 in exchange.markets:
-        return candidate_1
-    elif candidate_2 in exchange.markets:
-        return candidate_2
-    return candidate_1
+    """Membentuk format pasangan koin tanpa garis miring (contoh: BTCUSDT)"""
+    clean_coin = coin_str.upper().replace("USDT", "").replace("/", "").replace(":", "").strip()
+    return f"{clean_coin}USDT"
 
 def set_leverage(symbol, lev_val):
     try:
@@ -294,19 +282,14 @@ def process_telegram_commands():
                         ticker = None
                         try:
                             ticker = exchange.fetch_ticker(target_symbol)
-                        except Exception:
-                            # Fallback format alternatif jika terjadi error
-                            try:
-                                alt_symbol = f"{raw_coin.upper().replace('USDT', '').replace('/', '')}/USDT:USDT"
-                                ticker = exchange.fetch_ticker(alt_symbol)
-                                target_symbol = alt_symbol
-                            except Exception:
-                                ticker = None
+                        except Exception as err:
+                            logging.warning(f"Gagal fetch_ticker untuk {target_symbol}: {err}")
+                            ticker = None
 
-                        if ticker:
+                        if ticker and ticker.get('last') is not None:
                             last_price = ticker.get('last', 0)
-                            high_24h = ticker.get('high', 0)
-                            low_24h = ticker.get('low', 0)
+                            high_24h = ticker.get('high', 0) or 0
+                            low_24h = ticker.get('low', 0) or 0
                             change_24h = ticker.get('percentage', 0) or 0
                             change_icon = "📈" if change_24h >= 0 else "📉"
                             
@@ -319,7 +302,7 @@ def process_telegram_commands():
                             )
                             send_telegram(price_msg)
                         else:
-                            send_telegram(f"❌ Gagal mengambil harga untuk `{raw_coin}`. Pastikan koin tersedia di Futures.")
+                            send_telegram(f"❌ Gagal mengambil harga untuk `{raw_coin}`. Pastikan koin tersedia di Bitget Futures.")
                     else:
                         send_telegram("⚠️ Format salah. Contoh: `/price ETH` atau `/p BTC`")
 
@@ -328,7 +311,7 @@ def process_telegram_commands():
                     if parts:
                         added, exists = [], []
                         for coin in parts:
-                            fmt = f"{coin.upper().replace('USDT', '').replace('/', '').replace(':', '')}/USDT"
+                            fmt = resolve_symbol(coin)
                             if fmt not in config["symbols"]:
                                 config["symbols"].append(fmt)
                                 set_leverage(fmt, config["leverage"])
@@ -351,7 +334,7 @@ def process_telegram_commands():
                     if parts:
                         removed, not_found = [], []
                         for coin in parts:
-                            fmt = f"{coin.upper().replace('USDT', '').replace('/', '').replace(':', '')}/USDT"
+                            fmt = resolve_symbol(coin)
                             if fmt in config["symbols"]:
                                 config["symbols"].remove(fmt)
                                 removed.append(fmt)
