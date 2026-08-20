@@ -72,7 +72,8 @@ exchange = ccxt.bitget({
     'enableRateLimit': True,
     'options': {
         'defaultType': 'swap',
-    }
+        'defaultsettle': 'USDT',
+    },
 })
 
 def set_leverage():
