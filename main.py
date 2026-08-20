@@ -83,7 +83,7 @@ def send_telegram(message):
             "text": message,
             "parse_mode": "Markdown"
         }
-        requests.post(url, json=payload, timeout=10)
+        requests.post(url, json=payload, timeout=5)
     except Exception as e:
         logging.error(f"Gagal mengirim pesan Telegram: {e}")
 
@@ -93,6 +93,7 @@ exchange = ccxt.bitget({
     'secret': SECRET_KEY,
     'password': PASSPHRASE,
     'enableRateLimit': True,
+    'timeout': 10000,
     'options': {
         'defaultType': 'swap',
         'defaultSettle': 'usdt',
@@ -108,7 +109,7 @@ def resolve_symbol(coin_str):
     return f"{clean_coin}USDT"
 
 def fetch_symbol_ticker_safe(raw_coin):
-    """Fungsi pencarian harga serbaguna dengan beberapa variasi format simbol CCXT Bitget"""
+    """Mencari harga dengan timeout cepat"""
     clean_coin = raw_coin.upper().replace("USDT", "").replace("/", "").replace(":", "").strip()
     candidates = [
         f"{clean_coin}/USDT:USDT",
@@ -249,13 +250,13 @@ def execute_trade(symbol, signal, entry_price, sl_price, tp_price):
         exchange.create_order(target_sym, 'market', 'buy', amount, params={'triggerPrice': sl_price, 'stopLossPrice': sl_price, 'reduceOnly': True})
         exchange.create_order(target_sym, 'market', 'buy', amount, params={'triggerPrice': tp_price, 'takeProfitPrice': tp_price, 'reduceOnly': True})
 
-# === 7. LISTENER PERINTAH INTERAKTIF TELEGRAM ===
+# === 7. LISTENER PERINTAH INTERAKTIF TELEGRAM (THREAD TERPISAH) ===
 def process_telegram_commands():
     last_update_id = 0
     while True:
         try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={last_update_id + 1}&timeout=10"
-            res = requests.get(url, timeout=12).json()
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={last_update_id + 1}&timeout=5"
+            res = requests.get(url, timeout=7).json()
 
             for result in res.get("result", []):
                 last_update_id = result["update_id"]
@@ -266,7 +267,6 @@ def process_telegram_commands():
                 if chat_id != TELEGRAM_CHAT_ID:
                     continue
 
-                # Proteksi perintah dengan Try-Except individual
                 try:
                     if text in ["/start", "/help"]:
                         help_msg = (
@@ -388,35 +388,37 @@ def process_telegram_commands():
         except Exception as e:
             logging.error(f"Error pada listener Telegram: {e}")
 
-        time.sleep(2)
-
-# === 8. LOOP UTAMA BOT ===
-def run_bot():
-    for symbol in config["symbols"]:
-        logging.info(f"[DEMO] Memeriksa kondisi chart untuk {symbol}...")
-        try:
-            signal, entry_p, sl_p, tp_p = analyze_market(symbol)
-            if signal:
-                execute_trade(symbol, signal, entry_p, sl_p, tp_p)
-            else:
-                logging.info(f"[DEMO] {symbol}: Tidak ada sinyal.")
-        except Exception as e:
-            logging.error(f"[DEMO] Kesalahan pada {symbol}: {e}")
-
         time.sleep(1)
+
+# === 8. LOOP UTAMA BOT AUTOTRADE (THREAD TERPISAH) ===
+def run_trading_loop():
+    while True:
+        for symbol in config["symbols"]:
+            logging.info(f"[DEMO] Memeriksa kondisi chart untuk {symbol}...")
+            try:
+                signal, entry_p, sl_p, tp_p = analyze_market(symbol)
+                if signal:
+                    execute_trade(symbol, signal, entry_p, sl_p, tp_p)
+                else:
+                    logging.info(f"[DEMO] {symbol}: Tidak ada sinyal.")
+            except Exception as e:
+                logging.error(f"[DEMO] Kesalahan pada {symbol}: {e}")
+
+            time.sleep(1)
+        
+        # Jeda 5 menit antar siklus analisis
+        time.sleep(300)
 
 if __name__ == '__main__':
     set_all_leverage()
 
-    # Thread Keep-Alive Server
-    Thread(target=run_web_server).start()
+    # Thread 1: Web Server Keep-Alive
+    Thread(target=run_web_server, daemon=True).start()
 
-    # Thread Listener Perintah Telegram Interaktif
+    # Thread 2: Telegram Interaktif (Selalu Siap Respon Instan)
     Thread(target=process_telegram_commands, daemon=True).start()
 
     send_telegram("🤖 *Bot Interaktif Ready!*\nKirim `/help` untuk melihat daftar perintah.")
 
-    # Loop Strategi Utama
-    while True:
-        run_bot()
-        time.sleep(300)
+    # Thread Utama: Loop Trading
+    run_trading_loop()
