@@ -64,7 +64,7 @@ def send_telegram(message):
     except Exception as e:
         logging.error(f"Gagal mengirim pesan Telegram: {e}")
 
-# === 4. INISIALISASI EXCHANGE (BITGET VIA CCXT) ===
+# === 4. INISIALISASI EXCHANGE (BITGET FUTURES VIA CCXT) ===
 exchange = ccxt.bitget({
     'apiKey': API_KEY,
     'secret': SECRET_KEY,
@@ -72,7 +72,8 @@ exchange = ccxt.bitget({
     'enableRateLimit': True,
     'options': {
         'defaultType': 'swap',
-        'defaultsettle': 'USDT',
+        'defaultSettle': 'usdt',
+        'subType': 'linear',
     },
 })
 
@@ -181,8 +182,8 @@ def execute_trade(signal, entry_price, sl_price, tp_price):
         )
         send_telegram(msg)
         exchange.create_market_buy_order(SYMBOL, amount)
-        exchange.create_order(SYMBOL, 'market', 'sell', amount, params={'stopLossPrice': sl_price, 'reduceOnly': True})
-        exchange.create_order(SYMBOL, 'market', 'sell', amount, params={'takeProfitPrice': tp_price, 'reduceOnly': True})
+        exchange.create_order(SYMBOL, 'market', 'sell', amount, params={'triggerPrice': sl_price, 'stopLossPrice': sl_price, 'reduceOnly': True})
+        exchange.create_order(SYMBOL, 'market', 'sell', amount, params={'triggerPrice': tp_price, 'takeProfitPrice': tp_price, 'reduceOnly': True})
 
     elif signal == 'SHORT':
         msg = (
@@ -195,12 +196,12 @@ def execute_trade(signal, entry_price, sl_price, tp_price):
         )
         send_telegram(msg)
         exchange.create_market_sell_order(SYMBOL, amount)
-        exchange.create_order(SYMBOL, 'market', 'buy', amount, params={'stopLossPrice': sl_price, 'reduceOnly': True})
-        exchange.create_order(SYMBOL, 'market', 'buy', amount, params={'takeProfitPrice': tp_price, 'reduceOnly': True})
+        exchange.create_order(SYMBOL, 'market', 'buy', amount, params={'triggerPrice': sl_price, 'stopLossPrice': sl_price, 'reduceOnly': True})
+        exchange.create_order(SYMBOL, 'market', 'buy', amount, params={'triggerPrice': tp_price, 'takeProfitPrice': tp_price, 'reduceOnly': True})
 
 # === 7. LOOP UTAMA BOT ===
 def run_bot():
-    logging.info("Memeriksa kondisi chart...")
+    logging.info(f"Memeriksa kondisi chart untuk {SYMBOL}...")
     try:
         signal, entry_p, sl_p, tp_p = analyze_market()
         if signal:
@@ -212,7 +213,7 @@ def run_bot():
 
 if __name__ == '__main__':
     set_leverage()
-    send_telegram("🤖 *Bot Autotrade Bitget Active!*\nSedang memantau koin CYS/USDT...")
+    send_telegram(f"🤖 *Bot Autotrade Bitget Active!*\nSedang memantau koin `{SYMBOL}`...")
     
     # Jalankan Server Web Mini untuk Render Keep-Alive
     Thread(target=run_web_server).start()
