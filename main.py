@@ -109,30 +109,32 @@ def resolve_symbol(coin_str):
     return f"{clean_coin}USDT"
 
 def fetch_symbol_ticker_fast(raw_coin):
-    """Mengambil harga langsung dari Public API Bitget (Cepat & Anti-Macet)"""
+    """Mengambil harga pasar nyata via CCXT Public tanpa sandbox delay/hang"""
     clean_coin = raw_coin.upper().replace("USDT", "").replace("/", "").replace(":", "").strip()
-    symbol_mix = f"{clean_coin}USDT"
     
-    url = f"https://api.bitget.com/api/v2/mix/market/ticker?productType=USDT-FUTURES&symbol={symbol_mix}"
-    try:
-        res = requests.get(url, timeout=3).json()
-        if res.get("code") == "00000" and res.get("data"):
-            data = res["data"][0]
-            last_price = float(data.get("lastPr", 0))
-            high_24h = float(data.get("high24h", 0))
-            low_24h = float(data.get("low24h", 0))
-            change_24h = float(data.get("change24h", 0)) * 100
+    symbol_candidates = [
+        f"{clean_coin}/USDT:USDT",
+        f"{clean_coin}/USDT",
+        f"{clean_coin}USDT"
+    ]
+    
+    # Public instance khusus agar cepat dan tidak terhalang sandbox mode
+    public_exchange = ccxt.bitget({'enableRateLimit': True, 'timeout': 5000})
+    
+    for sym in symbol_candidates:
+        try:
+            ticker = public_exchange.fetch_ticker(sym)
+            if ticker and ticker.get('last') is not None:
+                return {
+                    "last": float(ticker.get('last', 0)),
+                    "high": float(ticker.get('high', 0) or 0),
+                    "low": float(ticker.get('low', 0) or 0),
+                    "change": float(ticker.get('percentage', 0) or 0)
+                }, f"{clean_coin}USDT"
+        except Exception:
+            continue
             
-            return {
-                "last": last_price,
-                "high": high_24h,
-                "low": low_24h,
-                "change": change_24h
-            }, symbol_mix
-    except Exception as e:
-        logging.error(f"Gagal fetch ticker fast {symbol_mix}: {e}")
-        
-    return None, symbol_mix
+    return None, f"{clean_coin}USDT"
 
 def set_leverage(symbol, lev_val):
     try:
@@ -307,6 +309,8 @@ def process_telegram_commands():
                         parts = text.split()
                         if len(parts) > 1:
                             raw_coin = parts[1]
+                            send_telegram(f"⏳ Memeriksa harga `{raw_coin.upper()}`...")
+                            
                             data, used_symbol = fetch_symbol_ticker_fast(raw_coin)
 
                             if data:
@@ -320,7 +324,7 @@ def process_telegram_commands():
                                 )
                                 send_telegram(price_msg)
                             else:
-                                send_telegram(f"❌ Gagal mengambil harga untuk `{raw_coin}`. Pastikan koin tersedia di Bitget Futures.")
+                                send_telegram(f"❌ Gagal mengambil harga `{raw_coin.upper()}`. Pastikan simbol valid di Bitget (contoh: BTC, ETH, SOL).")
                         else:
                             send_telegram("⚠️ Format salah. Contoh: `/price ETH` atau `/p BTC`")
 
@@ -419,9 +423,13 @@ def run_trading_loop():
 if __name__ == '__main__':
     set_all_leverage()
 
+    # Jalankan Web Server Keep-Alive
     Thread(target=run_web_server, daemon=True).start()
+    
+    # Jalankan Listener Telegram di Thread Terpisah
     Thread(target=process_telegram_commands, daemon=True).start()
 
     send_telegram("🤖 *Bot Interaktif Ready!*\nKirim `/help` untuk melihat daftar perintah.")
 
+    # Jalankan Loop Autotrade
     run_trading_loop()
