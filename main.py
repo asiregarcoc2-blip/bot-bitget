@@ -12,12 +12,12 @@ from flask import Flask
 # Konfigurasi Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# === 1. MINI WEB SERVER UNTUK RENDER (KEEP-ALIVE) ===
+# === 1. MINI WEB SERVER UNTUK RENDER / KEEP-ALIVE ===
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot Bitget Autotrade Mandiri Aktif & Running!", 200
+    return "Bot Bitget Autotrade Mandiri (Demo Mode) Aktif & Running!", 200
 
 def run_web_server():
     port = int(os.environ.get('PORT', 10000))
@@ -64,7 +64,7 @@ def send_telegram(message):
     except Exception as e:
         logging.error(f"Gagal mengirim pesan Telegram: {e}")
 
-# === 4. INISIALISASI EXCHANGE (BITGET FUTURES VIA CCXT) ===
+# === 4. INISIALISASI EXCHANGE (BITGET DEMO FUTURES VIA CCXT) ===
 exchange = ccxt.bitget({
     'apiKey': API_KEY,
     'secret': SECRET_KEY,
@@ -75,22 +75,25 @@ exchange = ccxt.bitget({
         'defaultSettle': 'usdt',
         'subType': 'linear',
         'fetchMarkets': ['swap'],
-        'fetchCoins': False,  # Mematikan pemanggilan endpoint Spot Bitget
+        'fetchCoins': False,  # Mematikan pemanggilan API Spot
     },
 })
 
-# Bypass pemanggilan endpoint Spot dan muat pasar Futures saja
+# MENGARAHKAN KONEKSI KE SERVER DEMO BITGET (SANDBOX)
+exchange.set_sandbox_mode(True)
+
+# Memuat pasar Futures
 try:
     exchange.load_markets(reload=True, params={'type': 'swap'})
 except Exception as e:
-    logging.warning(f"Warning load markets: {e}")
+    logging.warning(f"Warning load markets demo: {e}")
 
 def set_leverage():
     try:
         exchange.set_leverage(LEVERAGE, SYMBOL)
-        logging.info(f"Leverage disetel ke {LEVERAGE}x untuk {SYMBOL}")
+        logging.info(f"[DEMO] Leverage disetel ke {LEVERAGE}x untuk {SYMBOL}")
     except Exception as e:
-        logging.warning(f"Gagal set leverage: {e}")
+        logging.warning(f"Gagal set leverage di mode Demo: {e}")
 
 # === 5. STRATEGI SWEEP & RECLAIM (PEMBACAAN DATA) ===
 def fetch_ohlcv(symbol, timeframe, limit=300):
@@ -168,20 +171,20 @@ def analyze_market():
 
     return signal, close_p, sl_price, tp_price
 
-# === 6. EKSEKUSI ORDER ===
+# === 6. EKSEKUSI ORDER (DEMO MODE) ===
 def execute_trade(signal, entry_price, sl_price, tp_price):
     positions = exchange.fetch_positions([SYMBOL])
     active_position = any(float(pos['contracts']) > 0 for pos in positions)
 
     if active_position:
-        logging.info("Posisi masih terbuka. Melewati sinyal baru.")
+        logging.info("[DEMO] Posisi masih terbuka. Melewati sinyal baru.")
         return
 
     amount = (POSITION_SIZE_USDT * LEVERAGE) / entry_price
 
     if signal == 'LONG':
         msg = (
-            f"🚀 *BITGET AUTOTRADE: LONG*\n\n"
+            f"🚀 *BITGET AUTOTRADE [DEMO]: LONG*\n\n"
             f"• *Symbol:* `{SYMBOL}`\n"
             f"• *Entry:* `${entry_price:,.4f}`\n"
             f"• *SL:* `${sl_price:,.4f}`\n"
@@ -195,7 +198,7 @@ def execute_trade(signal, entry_price, sl_price, tp_price):
 
     elif signal == 'SHORT':
         msg = (
-            f"🔻 *BITGET AUTOTRADE: SHORT*\n\n"
+            f"🔻 *BITGET AUTOTRADE [DEMO]: SHORT*\n\n"
             f"• *Symbol:* `{SYMBOL}`\n"
             f"• *Entry:* `${entry_price:,.4f}`\n"
             f"• *SL:* `${sl_price:,.4f}`\n"
@@ -209,21 +212,21 @@ def execute_trade(signal, entry_price, sl_price, tp_price):
 
 # === 7. LOOP UTAMA BOT ===
 def run_bot():
-    logging.info(f"Memeriksa kondisi chart untuk {SYMBOL}...")
+    logging.info(f"[DEMO] Memeriksa kondisi chart untuk {SYMBOL}...")
     try:
         signal, entry_p, sl_p, tp_p = analyze_market()
         if signal:
             execute_trade(signal, entry_p, sl_p, tp_p)
         else:
-            logging.info("Tidak ada sinyal yang memenuhi kriteria.")
+            logging.info("[DEMO] Tidak ada sinyal yang memenuhi kriteria.")
     except Exception as e:
-        logging.error(f"Terjadi kesalahan saat mengeksekusi bot: {e}")
+        logging.error(f"[DEMO] Terjadi kesalahan saat mengeksekusi bot: {e}")
 
 if __name__ == '__main__':
     set_leverage()
-    send_telegram(f"🤖 *Bot Autotrade Bitget Active!*\nSedang memantau koin `{SYMBOL}`...")
+    send_telegram(f"🧪 *Bot Autotrade Bitget (DEMO MODE) Active!*\nSedang memantau koin `{SYMBOL}`...")
     
-    # Jalankan Server Web Mini untuk Render Keep-Alive
+    # Jalankan Server Web Mini untuk Keep-Alive
     Thread(target=run_web_server).start()
     
     # Loop Pengecekan Setiap 5 Menit (300 Detik)
